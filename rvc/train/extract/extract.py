@@ -2,13 +2,13 @@ import os
 import sys
 import glob
 import time
-from rich.progress import Progress
 import torch
 import torchcrepe
 import numpy as np
 import concurrent.futures
 import multiprocessing as mp
 import json
+from rich.progress import Progress
 
 now_dir = os.getcwd()
 sys.path.append(os.path.join(now_dir))
@@ -100,7 +100,7 @@ class FeatureInput:
                 f"An error occurred extracting file {inp_path} on {self.device}: {error}"
             )
 
-    def process_files(self, files, f0_method, hop_length, device, threads, progress):
+    def process_files(self, files, f0_method, hop_length, device, threads):
         self.device = device
         if f0_method == "rmvpe":
             self.model_rmvpe = RMVPE0Predictor(
@@ -111,11 +111,14 @@ class FeatureInput:
         def worker(file_info):
             self.process_file(file_info, f0_method, hop_length)
 
-        task_id = progress.add_task(f"[cyan]Device: {device} - Pitch Extraction...", total=len(files))
-        with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
-            futures = [executor.submit(worker, f) for f in files]
-            for _ in concurrent.futures.as_completed(futures):
-                progress.update(task_id, advance=1)
+        with Progress() as progress:
+            task_id = progress.add_task(
+                f"[cyan]Device: {device} - Pitch Extraction...", total=len(files)
+            )
+            with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
+                futures = [executor.submit(worker, f) for f in files]
+                for _ in concurrent.futures.as_completed(futures):
+                    progress.update(task_id, advance=1)
 
 
 def run_pitch_extraction(files, devices, f0_method, hop_length, threads):
@@ -125,28 +128,25 @@ def run_pitch_extraction(files, devices, f0_method, hop_length, threads):
     )
     start_time = time.time()
     fe = FeatureInput()
-    progress = Progress()
-    with progress: 
-        with concurrent.futures.ProcessPoolExecutor(max_workers=len(devices)) as executor:
-            tasks = [
-                executor.submit(
-                    fe.process_files,
-                    files[i :: len(devices)],
-                    f0_method,
-                    hop_length,
-                    devices[i],
-                    threads // len(devices),
-                    progress,
-                )
-                for i in range(len(devices))
-            ]
-            concurrent.futures.wait(tasks)
+    with concurrent.futures.ProcessPoolExecutor(max_workers=len(devices)) as executor:
+        tasks = [
+            executor.submit(
+                fe.process_files,
+                files[i :: len(devices)],
+                f0_method,
+                hop_length,
+                devices[i],
+                threads // len(devices),
+            )
+            for i in range(len(devices))
+        ]
+        concurrent.futures.wait(tasks)
 
     print(f"Pitch extraction completed in {time.time() - start_time:.2f} seconds.")
 
 
 def process_file_embedding(
-    files, embedder_model, embedder_model_custom, device_num, device, n_threads, progress
+    files, embedder_model, embedder_model_custom, device_num, device, n_threads
 ):
     model = load_embedding(embedder_model, embedder_model_custom).to(device).float()
     model.eval()
@@ -166,11 +166,15 @@ def process_file_embedding(
         else:
             print(f"{wav_file_path} produced NaN values; skipping.")
 
-    task_id = progress.add_task(f"[bold magenta]Device: {device_num} - Embedding Extraction...", total=len(files))
-    with concurrent.futures.ThreadPoolExecutor(max_workers=n_threads) as executor:
-        futures = [executor.submit(worker, f) for f in files]
-        for _ in concurrent.futures.as_completed(futures):
-            progress.update(task_id, advance=1)
+    with Progress() as progress:
+        task_id = progress.add_task(
+            f"[bold magenta]Device: {device_num} - Embedding Extraction...",
+            total=len(files),
+        )
+        with concurrent.futures.ThreadPoolExecutor(max_workers=n_threads) as executor:
+            futures = [executor.submit(worker, f) for f in files]
+            for _ in concurrent.futures.as_completed(futures):
+                progress.update(task_id, advance=1)
 
 
 def run_embedding_extraction(
@@ -181,23 +185,20 @@ def run_embedding_extraction(
         f"Starting embedding extraction with {num_processes} cores on {devices_str}..."
     )
     start_time = time.time()
-    progress = Progress()
-    with progress:
-        with concurrent.futures.ProcessPoolExecutor(max_workers=len(devices)) as executor:
-            tasks = [
-                executor.submit(
-                    process_file_embedding,
-                    files[i :: len(devices)],
-                    embedder_model,
-                    embedder_model_custom,
-                    i,
-                    devices[i],
-                    threads // len(devices),
-                    progress,
-                )
-                for i in range(len(devices))
-            ]
-            concurrent.futures.wait(tasks)
+    with concurrent.futures.ProcessPoolExecutor(max_workers=len(devices)) as executor:
+        tasks = [
+            executor.submit(
+                process_file_embedding,
+                files[i :: len(devices)],
+                embedder_model,
+                embedder_model_custom,
+                i,
+                devices[i],
+                threads // len(devices),
+            )
+            for i in range(len(devices))
+        ]
+        concurrent.futures.wait(tasks)
 
     print(f"Embedding extraction completed in {time.time() - start_time:.2f} seconds.")
 
