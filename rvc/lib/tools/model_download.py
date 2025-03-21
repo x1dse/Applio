@@ -6,7 +6,7 @@ import zipfile
 import requests
 from bs4 import BeautifulSoup
 from urllib.parse import unquote
-from tqdm import tqdm
+from rich.progress import Progress
 
 now_dir = os.getcwd()
 sys.path.append(now_dir)
@@ -95,12 +95,13 @@ def save_response_content(response):
     total_size = int(response.headers.get("Content-Length", 0))
     chunk_size = 1024
 
-    with open(os.path.join(zips_path, file_name), "wb") as file, tqdm(
-        total=total_size, unit="B", unit_scale=True, desc=file_name
-    ) as progress_bar:
+    with open(os.path.join(zips_path, file_name), "wb") as file, Progress() as progress:
+        pbar = progress.add_task(
+            "[bold magenta]Downloading...", total=total_size, unit="B", unit_scale=True
+        )
         for data in response.iter_content(chunk_size):
             file.write(data)
-            progress_bar.update(len(data))
+            progress.update(pbar, advance=len(data))
 
 
 def download_from_huggingface(url):

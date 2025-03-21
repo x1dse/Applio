@@ -9,7 +9,7 @@ import warnings
 from typing import Optional, Union, IO
 import requests
 from urllib.parse import urlparse, unquote
-from tqdm import tqdm
+from rich.progress import Progress
 
 CHUNK_SIZE = 512 * 1024
 HOME = os.path.expanduser("~")
@@ -252,34 +252,35 @@ def download(
         res = sess.get(url, headers=headers, stream=True, verify=verify)
         res.raise_for_status()
 
-    try:
-        total = int(res.headers.get("Content-Length", 0))
-        if total > 0:
-            if not quiet:
-                pbar = tqdm(
-                    total=total, unit="B", unit_scale=True, desc=filename_from_url
-                )
-        else:
-            if not quiet:
-                pbar = tqdm(unit="B", unit_scale=True, desc=filename_from_url)
+    with Progress() as progress:
+        try:
+            total = int(res.headers.get("Content-Length", 0))
+            if total > 0:
+                if not quiet:
+                    pbar = progress.add_task(
+                        "[bold magenta]Downloading...", total=total, unit="B", unit_scale=True
+                    )
+            else:
+                if not quiet:
+                    pbar = progress.add_task(
+                        "[bold magenta]Downloading...", total=0, unit="B", unit_scale=True
+                    )
 
-        t_start = time.time()
-        for chunk in res.iter_content(chunk_size=CHUNK_SIZE):
-            file_obj.write(chunk)
-            if not quiet:
-                pbar.update(len(chunk))
-            if speed is not None:
-                elapsed_time_expected = 1.0 * pbar.n / speed
-                elapsed_time = time.time() - t_start
-                if elapsed_time < elapsed_time_expected:
-                    time.sleep(elapsed_time_expected - elapsed_time)
-        if not quiet:
-            pbar.close()
+            t_start = time.time()
+            for chunk in res.iter_content(chunk_size=CHUNK_SIZE):
+                file_obj.write(chunk)
+                if not quiet:
+                    progress.update(pbar, advance=len(chunk))
+                if speed is not None:
+                    elapsed_time_expected = 1.0 * progress.tasks[pbar].completed / speed
+                    elapsed_time = time.time() - t_start
+                    if elapsed_time < elapsed_time_expected:
+                        time.sleep(elapsed_time_expected - elapsed_time)
 
-        if temp_file_path:
-            file_obj.close()
-            shutil.move(temp_file_path, download_path)
-    finally:
-        sess.close()
+            if temp_file_path:
+                file_obj.close()
+                shutil.move(temp_file_path, download_path)
+        finally:
+            sess.close()
 
     return download_path

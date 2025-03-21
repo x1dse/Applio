@@ -5,7 +5,7 @@ from scipy import signal
 from scipy.io import wavfile
 import numpy as np
 import concurrent.futures
-from tqdm import tqdm
+from rich.progress import Progress
 import json
 from distutils.util import strtobool
 import librosa
@@ -281,7 +281,8 @@ def preprocess_training_set(
 
     # print(f"Number of files: {len(files)}")
     audio_length = []
-    with tqdm(total=len(files)) as pbar:
+    with Progress() as progress:
+        pbar = progress.add_task("[bold magenta]Preprocessing...", total=len(files))
         with concurrent.futures.ProcessPoolExecutor(
             max_workers=num_processes
         ) as executor:
@@ -303,7 +304,7 @@ def preprocess_training_set(
             ]
             for future in concurrent.futures.as_completed(futures):
                 audio_length.append(future.result())
-                pbar.update(1)
+                progress.update(pbar, advance=1)
 
     audio_length = sum(audio_length)
     save_dataset_duration(

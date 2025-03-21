@@ -2,7 +2,7 @@ import os
 import sys
 import glob
 import time
-import tqdm
+from rich.progress import Progress
 import torch
 import torchcrepe
 import numpy as np
@@ -100,7 +100,7 @@ class FeatureInput:
                 f"An error occurred extracting file {inp_path} on {self.device}: {error}"
             )
 
-    def process_files(self, files, f0_method, hop_length, device, threads):
+    def process_files(self, files, f0_method, hop_length, device, threads, progress):
         self.device = device
         if f0_method == "rmvpe":
             self.model_rmvpe = RMVPE0Predictor(
@@ -111,11 +111,12 @@ class FeatureInput:
         def worker(file_info):
             self.process_file(file_info, f0_method, hop_length)
 
-        with tqdm.tqdm(total=len(files), leave=True) as pbar:
+        with progress:
+            task_id = progress.add_task(f"[cyan]Device: {device} - Pitch Extraction...", total=len(files))
             with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
                 futures = [executor.submit(worker, f) for f in files]
                 for _ in concurrent.futures.as_completed(futures):
-                    pbar.update(1)
+                    progress.update(task_id, advance=1)
 
 
 def run_pitch_extraction(files, devices, f0_method, hop_length, threads):
@@ -125,6 +126,7 @@ def run_pitch_extraction(files, devices, f0_method, hop_length, threads):
     )
     start_time = time.time()
     fe = FeatureInput()
+    progress = Progress()
     with concurrent.futures.ProcessPoolExecutor(max_workers=len(devices)) as executor:
         tasks = [
             executor.submit(
@@ -134,6 +136,7 @@ def run_pitch_extraction(files, devices, f0_method, hop_length, threads):
                 hop_length,
                 devices[i],
                 threads // len(devices),
+                progress,
             )
             for i in range(len(devices))
         ]
@@ -143,7 +146,7 @@ def run_pitch_extraction(files, devices, f0_method, hop_length, threads):
 
 
 def process_file_embedding(
-    files, embedder_model, embedder_model_custom, device_num, device, n_threads
+    files, embedder_model, embedder_model_custom, device_num, device, n_threads, progress
 ):
     model = load_embedding(embedder_model, embedder_model_custom).to(device).float()
     model.eval()
@@ -163,11 +166,12 @@ def process_file_embedding(
         else:
             print(f"{wav_file_path} produced NaN values; skipping.")
 
-    with tqdm.tqdm(total=len(files), leave=True, position=device_num) as pbar:
+    with progress:
+        task_id = progress.add_task(f"[bold magenta]Device: {device_num} - Embedding Extraction...", total=len(files))
         with concurrent.futures.ThreadPoolExecutor(max_workers=n_threads) as executor:
             futures = [executor.submit(worker, f) for f in files]
             for _ in concurrent.futures.as_completed(futures):
-                pbar.update(1)
+                progress.update(task_id, advance=1)
 
 
 def run_embedding_extraction(
@@ -178,6 +182,7 @@ def run_embedding_extraction(
         f"Starting embedding extraction with {num_processes} cores on {devices_str}..."
     )
     start_time = time.time()
+    progress = Progress()
     with concurrent.futures.ProcessPoolExecutor(max_workers=len(devices)) as executor:
         tasks = [
             executor.submit(
@@ -188,6 +193,7 @@ def run_embedding_extraction(
                 i,
                 devices[i],
                 threads // len(devices),
+                progress,
             )
             for i in range(len(devices))
         ]

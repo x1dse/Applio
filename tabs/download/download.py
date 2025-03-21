@@ -5,10 +5,9 @@ import shutil
 import requests
 import tempfile
 import gradio as gr
-import pandas as pd
 
 from concurrent.futures import ThreadPoolExecutor
-from tqdm import tqdm
+from rich.progress import Progress
 
 
 now_dir = os.getcwd()
@@ -108,14 +107,14 @@ def get_file_size(url):
     return int(response.headers.get("content-length", 0))
 
 
-def download_file(url, destination_path, progress_bar):
+def download_file(url, destination_path, progress, task_id):
     os.makedirs(os.path.dirname(destination_path), exist_ok=True)
     response = requests.get(url, stream=True)
     block_size = 1024
     with open(destination_path, "wb") as file:
         for data in response.iter_content(block_size):
             file.write(data)
-            progress_bar.update(len(data))
+            progress.update(task_id, advance=len(data))
 
 
 def download_pretrained_model(model, sample_rate):
@@ -131,21 +130,22 @@ def download_pretrained_model(model, sample_rate):
 
     gr.Info("Downloading pretrained model...")
 
-    with tqdm(
-        total=total_size, unit="iB", unit_scale=True, desc="Downloading files"
-    ) as progress_bar:
+    with Progress() as progress:
+        progress_bar = progress.add_task("Downloading files", total=total_size)
         with ThreadPoolExecutor(max_workers=2) as executor:
             futures = [
                 executor.submit(
                     download_file,
                     d_url,
                     os.path.join(pretraineds_custom_path, os.path.basename(paths["D"])),
+                    progress,
                     progress_bar,
                 ),
                 executor.submit(
                     download_file,
                     g_url,
                     os.path.join(pretraineds_custom_path, os.path.basename(paths["G"])),
+                    progress,
                     progress_bar,
                 ),
             ]

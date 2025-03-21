@@ -11,7 +11,7 @@ from collections import deque
 from distutils.util import strtobool
 from random import randint, shuffle
 from time import time as ttime
-from tqdm import tqdm
+from rich.progress import Progress
 import numpy as np
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.tensorboard import SummaryWriter
@@ -640,7 +640,8 @@ def train_and_evaluate(
         data_iterator = enumerate(train_loader)
 
     epoch_recorder = EpochRecorder()
-    with tqdm(total=len(train_loader), leave=False) as pbar:
+    with Progress() as progress:
+        pbar = progress.add_task("Training", total=len(train_loader))
         for batch_idx, info in data_iterator:
             if device.type == "cuda" and not cache_data_in_gpu:
                 info = [tensor.cuda(device_id, non_blocking=True) for tensor in info]
@@ -743,7 +744,7 @@ def train_and_evaluate(
                     scalars=scalar_dict,
                 )
 
-            pbar.update(1)
+            progress.update(pbar, advance=1)
         # end of batch train
     # end of tqdm
     with torch.no_grad():

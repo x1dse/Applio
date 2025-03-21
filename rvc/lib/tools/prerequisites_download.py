@@ -1,7 +1,7 @@
 import os
 from concurrent.futures import ThreadPoolExecutor
-from tqdm import tqdm
 import requests
+from rich.progress import Progress
 
 url_base = "https://huggingface.co/IAHispano/Applio/resolve/main/Resources"
 
@@ -48,27 +48,31 @@ def get_file_size_if_missing(file_list):
     return total_size
 
 
-def download_file(url, destination_path, global_bar):
+def download_file(url, destination_path, progress, task_id):
     """
     Download a file from the given URL to the specified destination path,
-    updating the global progress bar as data is downloaded.
+    updating the rich progress bar as data is downloaded.
     """
 
     dir_name = os.path.dirname(destination_path)
     if dir_name:
         os.makedirs(dir_name, exist_ok=True)
     response = requests.get(url, stream=True)
+    total_size = int(response.headers.get('content-length', 0))
+    progress.update(task_id, total=total_size, description=f"Downloading {os.path.basename(destination_path)}")
     block_size = 1024
+    downloaded = 0
     with open(destination_path, "wb") as file:
         for data in response.iter_content(block_size):
             file.write(data)
-            global_bar.update(len(data))
+            downloaded += len(data)
+            progress.update(task_id, advance=len(data))
 
 
-def download_mapping_files(file_mapping_list, global_bar):
+def download_mapping_files(file_mapping_list, progress, task_id):
     """
     Download all files in the provided file mapping list using a thread pool executor,
-    and update the global progress bar as downloads progress.
+    and update the rich progress bar as downloads progress.
     """
     with ThreadPoolExecutor() as executor:
         futures = []
@@ -80,7 +84,7 @@ def download_mapping_files(file_mapping_list, global_bar):
                     url = f"{url_base}/{remote_folder}{file}"
                     futures.append(
                         executor.submit(
-                            download_file, url, destination_path, global_bar
+                            download_file, url, destination_path, progress, task_id
                         )
                     )
         for future in futures:
@@ -127,7 +131,7 @@ def prequisites_download_pipeline(
     exe,
 ):
     """
-    Manage the download pipeline for different categories of files.
+    Manage the download pipeline for different categories of files using rich progress bar.
     """
     total_size = calculate_total_size(
         pretraineds_hifigan_list if pretraineds_hifigan else [],
@@ -136,18 +140,29 @@ def prequisites_download_pipeline(
     )
 
     if total_size > 0:
-        with tqdm(
-            total=total_size, unit="iB", unit_scale=True, desc="Downloading all files"
-        ) as global_bar:
+        with Progress() as progress:
+            task_id = progress.add_task("Downloading all files", total=total_size)
             if models:
-                download_mapping_files(models_list, global_bar)
-                download_mapping_files(embedders_list, global_bar)
+                download_mapping_files(models_list, progress, task_id)
+                download_mapping_files(embedders_list, progress, task_id)
             if exe:
                 if os.name == "nt":
-                    download_mapping_files(executables_list, global_bar)
+                    download_mapping_files(executables_list, progress, task_id)
                 else:
                     print("No executables needed")
             if pretraineds_hifigan:
-                download_mapping_files(pretraineds_hifigan_list, global_bar)
+                download_mapping_files(pretraineds_hifigan_list, progress, task_id)
+            progress.stop_task(task_id) # Ensure task is stopped after completion
+            progress.update(task_id, description="[bold green]Download Complete!")
+
     else:
-        pass
+        print("All files are already downloaded.")
+
+
+if __name__ == "__main__":
+    # Example usage:
+    prequisites_download_pipeline(
+        pretraineds_hifigan=True,
+        models=True,
+        exe=True,
+    )
